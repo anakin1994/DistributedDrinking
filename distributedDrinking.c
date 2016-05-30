@@ -21,7 +21,7 @@
 #define BUFFER_SIZE 1024
 
 #define STRUCT_SIZE 4
-#define PROGRAM_TIME 10000000
+#define PROGRAM_TIME 1000000
 
 long random_at_most(long max) {
   unsigned long
@@ -62,9 +62,6 @@ struct Message
 
 int main(int argc,char **argv)
 {
-	FILE * resultFile;
-	resultFile = fopen("result.txt", "w");
-
 	MPI_Init(&argc, &argv); 
 	
 	MPI_Status status;
@@ -99,6 +96,11 @@ int main(int argc,char **argv)
 	int lockedArbiters = 0;
 	int messagesInBuffer = 0;
 	int lastArbirerReqClock = 0;
+
+	FILE * resultFile;
+	char fileName[16];
+	snprintf(fileName, sizeof(fileName), "result_%d.txt", world_rank);
+	resultFile = fopen(fileName, "w");
 
 	fprintf(resultFile, "%d: %d started\n", clock, world_rank);
 	
