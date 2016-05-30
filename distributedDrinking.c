@@ -214,8 +214,11 @@ int main(int argc,char **argv)
 						MPI_Send(&message, 1, drinkerMessage, from, MSG_TAG, MPI_COMM_WORLD);
 						//send_direct(msg{type == MSG_ARBITER_ACK, c = clock, lArbiters = lockedArbiters});	//Tylko procesy w tym stanie mają pełną wiedzę o liczbie zajętych arbitrów
 					}
-					reqBuffer[messagesInBuffer] = recvMessage;
-					messagesInBuffer++;
+					else
+					{
+						reqBuffer[messagesInBuffer] = recvMessage;
+						messagesInBuffer++;
+					}
 				}
 			}
 			if (recvMessage.type == MSG_ARBITER_ACK)
