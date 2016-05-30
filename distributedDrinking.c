@@ -99,6 +99,8 @@ int main(int argc,char **argv)
 	int lockedArbiters = 0;
 	int messagesInBuffer = 0;
 	int lastArbirerReqClock = 0;
+
+	fprintf(resultFile, "%d: %d started\n", clock, world_rank);
 	
 	while(clock < PROGRAM_TIME)
 	{
