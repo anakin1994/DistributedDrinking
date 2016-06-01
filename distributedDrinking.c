@@ -6,7 +6,7 @@
 
 #define STATE_DRUNK 0
 #define STATE_WAITING_FOR_GROUP 1
-#define STATE_FOMING_GROUP 2
+#define STATE_FORMING_GROUP 2
 #define STATE_WAITING_FOR_ARBITER 3
 #define STATE_DRINKING 4
 
@@ -20,7 +20,7 @@
 #define GROUP_SIZE 10
 #define BUFFER_SIZE 1024
 
-#define STRUCT_SIZE 4
+#define STRUCT_SIZE 6
 #define PROGRAM_TIME 1000000
 
 long random_at_most(long max) {
@@ -58,6 +58,8 @@ struct Message
 	int type;
 	int c;
 	int lArbiters;
+	int gId;
+	int gCount;
 };
 
 int main(int argc,char **argv)
@@ -72,8 +74,8 @@ int main(int argc,char **argv)
 
 	//	MPI struct settings
 	//	Remember to update definitions while changing STRUCT_SIZE
-	int blocklengths[STRUCT_SIZE] = {1,1,1,1};
-	MPI_Datatype types[STRUCT_SIZE] = {MPI_INT, MPI_INT, MPI_INT, MPI_INT};
+	int blocklengths[STRUCT_SIZE] = {1,1,1,1,1,1};
+	MPI_Datatype types[STRUCT_SIZE] = {MPI_INT, MPI_INT, MPI_INT, MPI_INT,MPI_INT,MPI_INT};
 	MPI_Datatype drinkerMessage;
 	MPI_Aint offsets[STRUCT_SIZE];
 
@@ -81,6 +83,8 @@ int main(int argc,char **argv)
 	offsets[1] = offsetof(struct Message, type);
 	offsets[2] = offsetof(struct Message, c);
 	offsets[3] = offsetof(struct Message, lArbiters);
+	offsets[4] = offsetof(struct Message, gId);
+	offsets[5] = offsetof(struct Message, gCount);
 	
 	MPI_Type_create_struct(STRUCT_SIZE, blocklengths, offsets, types, &drinkerMessage);
 	MPI_Type_commit(&drinkerMessage);
@@ -89,7 +93,7 @@ int main(int argc,char **argv)
 	int clock = 0;
 	int state = STATE_DRUNK;
 	int wantsToDrink = 0;
-	int groupId = 0;
+	int groupId = -1;
 	int groupJoins = 0;
 	int ackMessages = 0;
 	struct Message reqBuffer[BUFFER_SIZE];
@@ -116,7 +120,7 @@ int main(int argc,char **argv)
 				lastArbirerReqClock = clock;
 				int i;
 				struct Message message;
-				message.type = MSG_ARBITER_REQ;
+				message.type = MSG_GROUP_REQ;
 				message.c = clock;
 				message.from = world_rank;
 				for(i = 0; i < world_size; i++)
@@ -126,8 +130,35 @@ int main(int argc,char **argv)
 						MPI_Send(&message, 1, drinkerMessage, i, MSG_TAG, MPI_COMM_WORLD);
 					}
 				}
-				//send_broadcast(msg{type = MSG_ARBITER_REQ, c = clock});	//TODO: Zmiana na group_req
+				state = STATE_WAITING_FOR_GROUP;
+			}
+		}
+		if (state == STATE_WAITING_FOR_GROUP && world_rank == 0 && groupId == -1)	//HACK PM: Dopóki nie wymyślimy, jak ogarnąć tworzenie grup, nieh tylko proces 0 je tworzy
+		{
+			state = STATE_FORMING_GROUP;
+			groupId = world_rank;	//should be unique
+			fprintf(resultFile, "%d: %d formed new group : %d\n", clock, world_rank, groupId);
+			groupJoins = 1;
+		}
+		if (state == STATE_FORMING_GROUP)
+		{
+			if (groupJoins >= /*GROUP_SIZE*/ world_size)	//HACK PM: dla celów testowych - na razie liczność grupy = liczba procesów
+			{
+				fprintf(resultFile, "%d: %d stated that group %d is complete and sends arbiter request\n", clock, world_rank, groupId);
 				state = STATE_WAITING_FOR_ARBITER;
+				struct Message message;
+				message.type = MSG_ARBITER_REQ;
+				message.c = clock;
+				message.from = world_rank;
+				message.gId = groupId;
+				int i;
+				for (i = 0; i < world_size; i++)
+				{
+					if (i != world_rank)
+					{
+						MPI_Send(&message, 1, drinkerMessage, i, MSG_TAG, MPI_COMM_WORLD);
+					}
+				}
 			}
 		}
 		if (state == STATE_WAITING_FOR_ARBITER)
@@ -162,8 +193,8 @@ int main(int argc,char **argv)
 				messagesInBuffer = 0;
 				//reqBuffer = [];		//TODO: czyszczenie tablicy
 				wantsToDrink = 0;
-				//groupId = 0;
-				//groupJoins = 0;
+				groupId = -1;
+				groupJoins = 0;
 				ackMessages = 0;
 			}
 		}
@@ -176,9 +207,56 @@ int main(int argc,char **argv)
 			MPI_Recv( &recvMessage, 1, drinkerMessage, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status );
 			int from = recvMessage.from;
 			clock = max(clock, recvMessage.c) + 1;
+			if (recvMessage.type == MSG_GROUP_REQ)
+			{
+				if (state == STATE_FORMING_GROUP)
+				{
+					struct Message message;
+					message.type = MSG_GROUP_ACK;
+					message.c = clock;
+					message.from = world_rank;
+					message.gId = groupId;
+					message.gCount = groupJoins;
+					MPI_Send(&message, 1, drinkerMessage, from, MSG_TAG, MPI_COMM_WORLD);
+				}
+			}
+			if (recvMessage.type == MSG_GROUP_ACK)
+			{
+				if (state == STATE_WAITING_FOR_GROUP)
+				{
+					state = STATE_FORMING_GROUP;
+					groupId = recvMessage.gId;
+					groupJoins = recvMessage.gCount;
+					fprintf(resultFile, "%d: %d joined group %d\n", clock, world_rank, groupId);
+					struct Message message;
+					message.type = MSG_GROUP_JOIN;
+					message.c = clock;
+					message.from = world_rank;
+					message.gId = groupId;
+					int i;
+					for (i = 0; i < world_size; i++)
+					{
+						if (i != world_rank)
+						{
+							MPI_Send(&message, 1, drinkerMessage, i, MSG_TAG, MPI_COMM_WORLD);
+						}
+					}
+				}
+			}
+			if (recvMessage.type == MSG_GROUP_JOIN)
+			{
+				if (state == STATE_FORMING_GROUP)
+				{
+					if (recvMessage.gId == groupId)
+					{
+						groupJoins++;
+						fprintf(resultFile, "%d: %d knows that %d joined his group %d which has %d members now\n", clock, world_rank, from, groupId, groupJoins);
+					}
+				}
+			}
 			if (recvMessage.type == MSG_ARBITER_REQ)
 			{
-				if (state == STATE_DRUNK || state == STATE_WAITING_FOR_GROUP || state == STATE_FOMING_GROUP)
+				if (state == STATE_DRUNK || state == STATE_WAITING_FOR_GROUP || state == STATE_FORMING_GROUP)
 				{
 					struct Message message;
 					message.type = MSG_ARBITER_ACK;
