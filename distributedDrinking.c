@@ -226,7 +226,7 @@ int main(int argc,char **argv)
 				{
 					state = STATE_FORMING_GROUP;
 					groupId = recvMessage.gId;
-					groupJoins = recvMessage.gCount;
+					groupJoins = recvMessage.gCount + 1;
 					fprintf(resultFile, "%d: %d joined group %d\n", clock, world_rank, groupId);
 					struct Message message;
 					message.type = MSG_GROUP_JOIN;
@@ -268,7 +268,7 @@ int main(int argc,char **argv)
 				}
 				else if (state == STATE_WAITING_FOR_ARBITER)
 				{
-					if (recvMessage.c < lastArbirerReqClock)
+					if (recvMessage.c < lastArbirerReqClock || recvMessage.gId == groupId)
 					{
 						struct Message message;
 						message.type = MSG_ARBITER_ACK;
