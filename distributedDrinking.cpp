@@ -30,12 +30,14 @@
 #define MSG_ARBITER_REQ 500
 #define MSG_ARBITER_ACK 510
 
+#define MSG_TIME_UP 600
+
 
 #define N_ARBITERS 10
 #define GROUP_SIZE 3
 #define BUFFER_SIZE 1024
 
-#define PROGRAM_TIME 1000000
+#define PROGRAM_TIME 100000
 
 #define STRUCT_SIZE 6
 #define GROUP_STRUCT_SIZE 4
@@ -173,7 +175,9 @@ int main(int argc,char **argv)
 	struct Message reqBuffer[BUFFER_SIZE];
 	int lockedArbiters = 0;
 	int messagesInBuffer = 0;
-	int lastArbirerReqClock = 0;
+	int lastArbiterReqClock = 0;
+
+	bool timeIsUp = false;
 
 	FILE * resultFile;
 	char fileName[16];
@@ -182,7 +186,7 @@ int main(int argc,char **argv)
 
 	fprintf(resultFile, "%d: %d started\n", clock, world_rank);
 	
-	while(clock < PROGRAM_TIME)
+	while(clock < PROGRAM_TIME && !timeIsUp)
 	{
 		clock++;
 		if (state == STATE_DRUNK)
@@ -190,7 +194,7 @@ int main(int argc,char **argv)
 			wantsToDrink = (random_at_most(1000) == 0);	//Zakładamy, że średni czas trzeźwienia to 1000 przebiegów pętli
 			if (wantsToDrink)
 			{
-				fprintf(resultFile, "%d: %d wants to drink\n", clock, world_rank);
+				fprintf(resultFile, "%d: %d sobered and wants to drink. He begins looking for a group\n", clock, world_rank);
 				groupRequestUp(world_rank);
 				
 				struct Message message;
@@ -224,6 +228,7 @@ int main(int argc,char **argv)
 				}
 			}
 			state = STATE_WAITING_FOR_GROUP;
+			fprintf(resultFile, "%d: %d is looking for a new group\n", clock, world_rank);
 		}
 		
 		if (state == STATE_WAITING_FOR_GROUP)
@@ -315,6 +320,7 @@ int main(int argc,char **argv)
 				}
 				
 				fprintf(resultFile, "%d: %d stated that group %d is complete and sends arbiter request\n", clock, world_rank, myGroupId);
+				lastArbiterReqClock = clock;
 				state = STATE_WAITING_FOR_ARBITER;
 				struct Message arbMessage;
 				arbMessage.type = MSG_ARBITER_REQ;
@@ -420,7 +426,7 @@ int main(int argc,char **argv)
 				}
 				else if (state == STATE_IN_DRAFT_GROUP)
 				{
-					if(myGroupClock > recvMessage.c)
+					if(myGroupClock > recvMessage.c || (myGroupClock == recvMessage.c && myGroupId > recvMessage.gId))
 					{
 						MPI_Send(&ackMessage, 1, standardMessage, from, STD_MSG_TAG, MPI_COMM_WORLD);
 
@@ -440,7 +446,7 @@ int main(int argc,char **argv)
 				}
 				else if(state == STATE_FORMING_GROUP || state == STATE_CONFIRMING_GROUP)
 				{
-					if(myGroupClock > recvMessage.c)
+					if(myGroupClock > recvMessage.c || (myGroupClock == recvMessage.c && myGroupId > recvMessage.gId))
 					{
 						Message disboundMessage;
 						disboundMessage.from = world_rank;
@@ -532,6 +538,7 @@ int main(int argc,char **argv)
 			{
 				//TODO check if im right to get this message
 				fprintf(resultFile, "%d: %d received info that group %d is complete and sends arbiter request\n", clock, world_rank, myGroupId);
+				lastArbiterReqClock = clock;
 				state = STATE_WAITING_FOR_ARBITER;
 				struct Message arbMessage;
 				arbMessage.type = MSG_ARBITER_REQ;
@@ -552,7 +559,7 @@ int main(int argc,char **argv)
 			{
 				if (state == STATE_WAITING_FOR_ARBITER)
 				{
-					if (recvMessage.c < lastArbirerReqClock || recvMessage.gId == myGroupId)
+					if (recvMessage.c < lastArbiterReqClock || recvMessage.gId == myGroupId || (recvMessage.c == lastArbiterReqClock && from < world_rank))
 					{
 						struct Message message;
 						message.type = MSG_ARBITER_ACK;
@@ -602,6 +609,7 @@ int main(int argc,char **argv)
 				if (state == STATE_WAITING_FOR_ARBITER)
 				{
 					ackMessages++;
+					fprintf(resultFile, "%d: %d recieved arbiter ACK from %d and has %d ACKs now\n", clock, world_rank, from, ackMessages);
 					lockedArbiters = max(lockedArbiters, recvMessage.lArbiters);
 				}
 				else if (state == STATE_DRINKING)
@@ -611,6 +619,11 @@ int main(int argc,char **argv)
 						lockedArbiters = recvMessage.lArbiters;
 					}
 				}
+			}
+			if (recvMessage.type == MSG_TIME_UP)
+			{
+				timeIsUp = true;
+				fprintf(resultFile, "%d: %d recieved end message from %d\n", clock, world_rank, from);
 			}
 			MPI_Iprobe(MPI_ANY_SOURCE, STD_MSG_TAG, MPI_COMM_WORLD, &isStdMessage, &status );
 		}
@@ -683,6 +696,18 @@ int main(int argc,char **argv)
 			}
 			
 			MPI_Iprobe(MPI_ANY_SOURCE, GROUP_MSG_TAG, MPI_COMM_WORLD, &isGroupAnnouncement, &status);
+		}
+	}
+
+	Message endMessage;
+	endMessage.from = world_rank;
+	endMessage.c = -1;	//Done this way to differ clock difference between threads from deadlock
+	endMessage.type = MSG_TIME_UP;
+	for (int i = 0; i < world_size; i++)
+	{
+		if (i != world_rank)
+		{
+			MPI_Send(&endMessage, 1, standardMessage, i, STD_MSG_TAG, MPI_COMM_WORLD);
 		}
 	}
 	
