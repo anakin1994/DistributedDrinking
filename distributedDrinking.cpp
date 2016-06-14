@@ -191,7 +191,7 @@ int main(int argc,char **argv)
 		clock++;
 		if (state == STATE_DRUNK)
 		{
-			wantsToDrink = (random_at_most(1000) == 0);	//Zakładamy, że średni czas trzeźwienia to 1000 przebiegów pętli
+			wantsToDrink = (random_at_most(1000) == 0);	//Zakladamy, ze sredni czas trzezwienia to 1000 przebieg�w petli
 			if (wantsToDrink)
 			{
 				fprintf(resultFile, "%d: %d sobered and wants to drink. He begins looking for a group\n", clock, world_rank);
@@ -340,7 +340,7 @@ int main(int argc,char **argv)
 		
 		if (state == STATE_WAITING_FOR_ARBITER)
 		{
-			if (ackMessages == world_size - 1)	//Jeżeli wszyscy nam pozwolą na dostęp
+			if (ackMessages == world_size - 1)	//Jezeli wszyscy nam pozwola na dostep
 			{
 				fprintf(resultFile, "%d: %d starts drinking\n", clock, world_rank);
 				lockedArbiters++;
@@ -350,7 +350,7 @@ int main(int argc,char **argv)
 		
 		if (state == STATE_DRINKING)
 		{
-			if (random_at_most(100) == 0)		//Zakładamy, że średni czas picia to 100 przebiegów pętli
+			if (random_at_most(100) == 0)		//Zakladamy, ze sredni czas picia to 100 przebieg�w petli
 			{
 				fprintf(resultFile, "%d: %d finished drinking\n", clock, world_rank);
 				state = STATE_DRUNK;
@@ -377,7 +377,7 @@ int main(int argc,char **argv)
 			}
 		}
 		
-		//Obsługa wiadomości:
+		//Obsluga wiadomosci:
 		int isStdMessage = 0;
 		MPI_Iprobe(MPI_ANY_SOURCE, STD_MSG_TAG, MPI_COMM_WORLD, &isStdMessage, &status );
 		while(isStdMessage)
@@ -501,7 +501,7 @@ int main(int argc,char **argv)
 			{
 				if(state == STATE_FORMING_GROUP)
 				{
-					//TODO upewnienie się czy ziomek jest w mojej grupie
+					//TODO upewnienie sie czy ziomek jest w mojej grupie
 					Message disboundMessage;
 					disboundMessage.from = world_rank;
 					disboundMessage.c = clock;
@@ -532,6 +532,35 @@ int main(int argc,char **argv)
 			{
 				//TODO check if im right to get this message
 				groupAckCount++;
+				fprintf(resultFile, "%d: %d received group ack from %d and has now %d group ack's\n",
+					clock, world_rank, from, groupAckCount);
+			}
+
+			if (recvMessage.type == MSG_GROUP_RJCT)
+			{
+				fprintf(resultFile, "%d: %d received group rjct from %d and disbounds his group\n",
+					clock, world_rank, from);
+
+				if (state == STATE_CONFIRMING_GROUP)
+				{
+					Message disboundMessage;
+					disboundMessage.from = world_rank;
+					disboundMessage.c = clock;
+					disboundMessage.type = MSG_GROUP_DISBOUND;
+					disboundMessage.gId = myGroupId;
+
+					for (int i = 0;i < GROUP_SIZE; i++)
+					{
+						if (myGroup[i] != world_rank && myGroup[i] != from)
+							MPI_Send(&disboundMessage, 1, standardMessage, myGroup[i], STD_MSG_TAG, MPI_COMM_WORLD);
+						myGroup[i] = -1;
+					}
+
+					groupAckCount = 0;
+					groupJoins = 0;
+
+					state = STATE_GROUP_DISBOUND;
+				}
 			}
 			
 			if(recvMessage.type == MSG_GROUP_CONFIRMED)
@@ -585,7 +614,7 @@ int main(int argc,char **argv)
 						message.lArbiters = lockedArbiters;
 						message.from = world_rank;
 						MPI_Send(&message, 1, standardMessage, from, STD_MSG_TAG, MPI_COMM_WORLD);
-						//send_direct(msg{type == MSG_ARBITER_ACK, c = clock, lArbiters = lockedArbiters});	//Tylko procesy w tym stanie mają pełną wiedzę o liczbie zajętych arbitrów
+						//send_direct(msg{type == MSG_ARBITER_ACK, c = clock, lArbiters = lockedArbiters});	//Tylko procesy w tym stanie maja pelna wiedze o liczbie zajetych arbitr�w
 					}
 					else
 					{
@@ -609,7 +638,7 @@ int main(int argc,char **argv)
 				if (state == STATE_WAITING_FOR_ARBITER)
 				{
 					ackMessages++;
-					fprintf(resultFile, "%d: %d recieved arbiter ACK from %d and has %d ACKs now\n", clock, world_rank, from, ackMessages);
+					fprintf(resultFile, "%d: %d received arbiter ACK from %d and has %d ACKs now\n", clock, world_rank, from, ackMessages);
 					lockedArbiters = max(lockedArbiters, recvMessage.lArbiters);
 				}
 				else if (state == STATE_DRINKING)
@@ -623,7 +652,7 @@ int main(int argc,char **argv)
 			if (recvMessage.type == MSG_TIME_UP)
 			{
 				timeIsUp = true;
-				fprintf(resultFile, "%d: %d recieved end message from %d\n", clock, world_rank, from);
+				fprintf(resultFile, "%d: %d received end message from %d\n", clock, world_rank, from);
 			}
 			MPI_Iprobe(MPI_ANY_SOURCE, STD_MSG_TAG, MPI_COMM_WORLD, &isStdMessage, &status );
 		}
